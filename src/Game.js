@@ -62,8 +62,6 @@ export class Game {
     this.raycaster = new THREE.Raycaster();
     this.raycaster.far = 2.6;
 
-    this._bindEvents();
-
     this.clock = new THREE.Clock();
   }
 
@@ -123,17 +121,16 @@ export class Game {
   }
 
   _bindEvents() {
+    const pauseScreen = document.getElementById('pause-screen');
+    const pauseStatus = document.getElementById('pause-status');
     document.addEventListener('pointerlockchange', () => {
       const locked = document.pointerLockElement === this.canvas;
       this.player.enabled = locked && this.state === 'playing';
-      if (!locked && this.state === 'playing') {
-        document.getElementById('pause-screen').classList.remove('hidden');
-      } else {
-        document.getElementById('pause-screen').classList.add('hidden');
-      }
+      pauseStatus.textContent = '';
+      pauseScreen.classList.toggle('hidden', locked || this.state !== 'playing');
     });
     document.addEventListener('pointerlockerror', () => this._showPointerLockRetry());
-    document.getElementById('pause-screen').addEventListener('click', () => this._requestPointerLock());
+    pauseScreen.addEventListener('click', () => this._requestPointerLock());
     document.addEventListener('keydown', (e) => {
       if (e.code === 'KeyE' && !e.repeat && this.state === 'playing') {
         if (this.hud.noteOpen) this.hud.hideNote();
@@ -156,6 +153,8 @@ export class Game {
   _showPointerLockRetry() {
     if (this.state === 'playing' && document.pointerLockElement !== this.canvas) {
       document.getElementById('pause-screen').classList.remove('hidden');
+      document.getElementById('pause-status').textContent =
+        'The browser could not capture the mouse. Click to retry. If you are in an embedded preview, open the game URL in its own tab.';
     }
   }
 
@@ -164,10 +163,10 @@ export class Game {
   start() {
     this.audio = new AudioEngine();
     this.audio.resume();
+    this._initialize();
+    this._bindEvents();
     this.state = 'playing';
     this._requestPointerLock();
-    this._initialize();
-    this.player.enabled = document.pointerLockElement === this.canvas;
     this.startTime = performance.now();
     this.audio.startAmbient();
     this.hud.show();
@@ -187,7 +186,7 @@ export class Game {
     this.renderer.setAnimationLoop(null);
     this.hud.showPerformance(false);
     this.player.enabled = false;
-    document.exitPointerLock();
+    if (document.pointerLockElement === this.canvas) document.exitPointerLock();
     this.audio.scream();
     this.audio.stopHeartbeat();
     this.audio.stopChaseMusic();
@@ -213,7 +212,7 @@ export class Game {
     this.audio.setBreathLevel(0);
     this.audio.setSizzle(0);
     this.audio.setDroneIntensity(0);
-    document.exitPointerLock();
+    if (document.pointerLockElement === this.canvas) document.exitPointerLock();
     const seconds = Math.round((performance.now() - this.startTime) / 1000);
     const m = Math.floor(seconds / 60), s = seconds % 60;
     const banishLine = this.banishes > 0

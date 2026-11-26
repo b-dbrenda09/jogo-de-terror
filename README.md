@@ -14,6 +14,13 @@ this game. Graphics and atmosphere first, functionality second.
 
 ## Quick start
 
+Play online at [GitHub Pages](https://b-dbrenda09.github.io/jogo-de-teror/), or open
+`dist/index.html` with **Open with Live Server** in VS Code. Use the compiled
+`dist` folder as the web root, or visit `/dist/` when Live Server serves the project
+root. The compiled game only needs a browser and static hosting.
+
+### Development
+
 ```bash
 npm install
 npm run dev
@@ -25,6 +32,10 @@ Open the printed localhost URL and click **Enter**.
 npm run build    # production bundle → dist/
 npm run preview  # serve the production build
 ```
+
+Regenerate `dist` after changing the source to refresh the copy used by Live Server.
+For GitHub Pages, select **GitHub Actions** under **Settings → Pages → Source**.
+The deploy workflow builds and publishes `dist` on pushes to `main`.
 
 ## Controls
 

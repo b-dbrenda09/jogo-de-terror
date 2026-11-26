@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Bridge Horror House</title>
+  <link rel="icon" href="data:," />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
@@ -170,10 +171,15 @@
 
     /* ----- pause ----- */
     #pause-screen {
-      z-index: 15; display: flex; align-items: center; justify-content: center;
+      z-index: 15; display: flex; flex-direction: column; align-items: center; justify-content: center;
       background: rgba(0,0,0,0.72); cursor: pointer;
     }
-    #pause-screen div { font-size: 1.1rem; letter-spacing: 0.3em; color: #8e8270; text-transform: uppercase; }
+    #resume-btn {
+      border: 0; background: transparent; cursor: inherit; font: inherit;
+      font-size: 1.1rem; letter-spacing: 0.3em; color: #8e8270; text-transform: uppercase;
+    }
+    #pause-status { max-width: 36rem; text-align: center; }
+    #pause-status:not(:empty) { margin: 12px 16px 0; }
 
     body.shake canvas#game { animation: shake 0.4s; }
     @keyframes shake {
@@ -224,7 +230,8 @@
   </div>
 
   <div id="pause-screen" class="overlay hidden">
-    <div>— Paused — Click to return to the dark —</div>
+    <button id="resume-btn" type="button">— Paused — Click to return to the dark —</button>
+    <p id="pause-status" role="status"></p>
   </div>
 
   <div id="title-screen" class="overlay">
@@ -255,15 +262,16 @@
   <script>
     const startupStatus = document.getElementById('start-status');
     if (location.protocol === 'file:') {
-      startupStatus.textContent = 'Run npm run dev and open the local URL shown in the terminal.';
+      startupStatus.textContent = 'Open the hosted game or serve dist/index.html with Live Server.';
     } else {
-      window.addEventListener('error', (event) => {
-        if (event.target.id === 'game-entry') {
-          startupStatus.textContent = 'The game could not load. Open the local URL from npm run dev and check the browser console.';
-        }
-      }, true);
+      window.addEventListener('load', () => {
+        if (!document.getElementById('start-btn').disabled || startupStatus.textContent) return;
+        startupStatus.textContent = document.querySelector('script[src="./src/main.js"]')
+          ? 'Open dist/index.html with Live Server to play the compiled game.'
+          : 'The game could not load. Reload the page and try again.';
+      }, { once: true });
     }
   </script>
-  <script id="game-entry" type="module" src="./src/main.js"></script>
+  <script type="module" src="./src/main.js"></script>
 </body>
 </html>
