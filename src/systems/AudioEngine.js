@@ -28,6 +28,7 @@ export class AudioEngine {
     this.heartbeatTimer = null;
     this.chaseTimer = null;
     this._noiseBuffer = this._makeNoise(2);
+    this.distortionCurves = new Map();
   }
 
   resume() { if (this.ctx.state === 'suspended') this.ctx.resume(); }
@@ -83,11 +84,14 @@ export class AudioEngine {
   }
 
   _distortionCurve(amount = 30) {
+    const cached = this.distortionCurves.get(amount);
+    if (cached) return cached;
     const n = 256, curve = new Float32Array(n);
     for (let i = 0; i < n; i++) {
       const x = (i / (n - 1)) * 2 - 1;
       curve[i] = ((3 + amount) * x * 20 * (Math.PI / 180)) / (Math.PI + amount * Math.abs(x));
     }
+    this.distortionCurves.set(amount, curve);
     return curve;
   }
 
@@ -198,7 +202,8 @@ export class AudioEngine {
 
   /** 0 = silent, 1 = he is on top of you */
   setBreathLevel(level) {
-    if (!this.breathGain) return;
+    if (!this.breathGain || this.breathLevel === level) return;
+    this.breathLevel = level;
     this.breathGain.gain.linearRampToValueAtTime(Math.min(1, level) * 0.14, this.now + 0.25);
   }
 
@@ -226,7 +231,8 @@ export class AudioEngine {
   }
 
   setSizzle(level) { // 0..1
-    if (!this.sizzleGain) return;
+    if (!this.sizzleGain || this.sizzleLevel === level) return;
+    this.sizzleLevel = level;
     this.sizzleGain.gain.linearRampToValueAtTime(level * 0.12, this.now + 0.08);
   }
 

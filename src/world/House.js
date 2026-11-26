@@ -36,6 +36,10 @@ class Door {
     this.hingeX = hingeX;
     this.wallZ = wallZ;
     this.width = width;
+    this.closedBounds = {
+      minX: hingeX, maxX: hingeX + width,
+      minZ: wallZ - 0.1, maxZ: wallZ + 0.1,
+    };
     this.openAngle = openAngle;
     this.angle = 0;
     this.target = 0;
@@ -77,18 +81,17 @@ class Door {
   }
 
   aabb() {
-    if (!this.isClosed) return null;
-    return {
-      minX: this.hingeX, maxX: this.hingeX + this.width,
-      minZ: this.wallZ - 0.1, maxZ: this.wallZ + 0.1,
-    };
+    return this.isClosed ? this.closedBounds : null;
   }
 }
 
 export class House {
-  constructor(scene) {
+  constructor(scene, dustCount = 240, batteryGlints = true) {
     this.scene = scene;
     this.staticColliders = [];
+    this.scareOccluders = [];
+    this.unitBox = new THREE.BoxGeometry(1, 1, 1);
+    this.trimBatches = new Map();
     this.doors = [];
     this.interactables = [];
     this.keys = [];
@@ -99,14 +102,18 @@ export class House {
     this.flickerTime = 0;
     this.lightningTime = 0;
     this.blackout = false;
+    this.batteryGlints = batteryGlints;
 
     this.mats = this._materials();
     this._buildShell();
+    this._buildTrimInstances();
     this._buildDoors();
     this._buildFurniture();
     this._buildLights();
+    this.electricLights = [...this.bulbs, ...this.windowLights];
     this._buildItems();
-    this._buildDust();
+    this._buildDust(dustCount);
+    this.colliders = this.staticColliders.slice();
   }
 
   /* ---------------- materials ---------------- */
@@ -180,6 +187,7 @@ export class House {
     mesh.receiveShadow = true;
     mesh.castShadow = true;
     this.scene.add(mesh);
+    this.scareOccluders.push(mesh);
     if (collide) {
       const half = WALL_T / 2 + 0.02;
       this.staticColliders.push(def.dir === 'x'
@@ -194,15 +202,29 @@ export class House {
     if (len < 0.4) return;
     for (const side of [-1, 1]) {
       const off = side * (WALL_T / 2 + 0.018);
-      const geo = def.dir === 'x'
-        ? new THREE.BoxGeometry(len, 0.13, 0.035)
-        : new THREE.BoxGeometry(0.035, 0.13, len);
-      const trim = new THREE.Mesh(geo, this.mats.wood);
-      if (def.dir === 'x') trim.position.set((a + b) / 2, 0.065, def.at + off);
-      else trim.position.set(def.at + off, 0.065, (a + b) / 2);
+      const alongX = def.dir === 'x';
+      const center = (a + b) / 2;
+      const x = alongX ? center : def.at + off;
+      const z = alongX ? def.at + off : center;
+      // Small spatial batches retain useful frustum culling for the trim.
+      const region = `${Math.floor((x + 10) / 7)}:${Math.floor((z + 8) / 6)}`;
+      if (!this.trimBatches.has(region)) this.trimBatches.set(region, []);
+      const transform = new THREE.Matrix4()
+        .makeScale(alongX ? len : 0.035, 0.13, alongX ? 0.035 : len)
+        .setPosition(x, 0.065, z);
+      this.trimBatches.get(region).push(transform);
+    }
+  }
+
+  _buildTrimInstances() {
+    for (const transforms of this.trimBatches.values()) {
+      const trim = new THREE.InstancedMesh(this.unitBox, this.mats.wood, transforms.length);
+      transforms.forEach((transform, index) => trim.setMatrixAt(index, transform));
       trim.receiveShadow = true;
+      trim.computeBoundingSphere();
       this.scene.add(trim);
     }
+    this.trimBatches.clear();
   }
 
   _buildDoors() {
@@ -216,17 +238,22 @@ export class House {
     this.props.frontDoor.mesh.material = this.mats.wood;
     this.props.frontDoor.mesh.userData.interact = { type: 'frontdoor', door: this.props.frontDoor };
     this.doors.push(this.props.studyDoor, this.props.bedroomDoor, this.props.frontDoor);
-    for (const d of this.doors) this.interactables.push(d.mesh);
+    for (const d of this.doors) {
+      this.interactables.push(d.mesh);
+      this.scareOccluders.push(d.mesh);
+    }
   }
 
   /* ---------------- furniture ---------------- */
 
   _box(x, z, w, h, d, mat, collide = true, y = null) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    const mesh = new THREE.Mesh(this.unitBox, mat);
+    mesh.scale.set(w, h, d);
     mesh.position.set(x, y === null ? h / 2 : y, z);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     this.scene.add(mesh);
+    this.scareOccluders.push(mesh);
     if (collide) {
       this.staticColliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
     }
@@ -475,8 +502,7 @@ export class House {
     g.rotation.z = Math.PI / 2 - 0.12;
     g.rotation.y = Math.random() * Math.PI;
     g.position.set(x, y + 0.035, z);
-    const glint = new THREE.PointLight(0x664433, 0.35, 1.1, 2);
-    g.add(glint);
+    if (this.batteryGlints) g.add(new THREE.PointLight(0x664433, 0.35, 1.1, 2));
     for (const child of [body, cap, tip]) {
       child.userData.interact = { type: 'battery', group: g };
       this.interactables.push(child);
@@ -487,6 +513,11 @@ export class House {
   removeBattery(group) {
     this.scene.remove(group);
     this.interactables = this.interactables.filter(m => m.userData.interact?.group !== group);
+    group.traverse((object) => {
+      if (!object.isMesh) return;
+      object.geometry.dispose();
+      object.material.dispose();
+    });
   }
 
   _key(x, y, z, id) {
@@ -526,12 +557,15 @@ export class House {
     this.scene.remove(group);
     this.keys = this.keys.filter(k => k !== group);
     this.interactables = this.interactables.filter(m => m.userData.interact?.group !== group);
+    group.traverse((object) => {
+      if (object.isMesh) object.geometry.dispose();
+    });
+    if (!this.keys.length) this.mats.brass.dispose();
   }
 
   /* ---------------- dust ---------------- */
 
-  _buildDust() {
-    const N = 240;
+  _buildDust(N) {
     const pos = new Float32Array(N * 3);
     for (let i = 0; i < N; i++) {
       pos[i * 3] = BOUNDS.minX + Math.random() * 20;
@@ -539,7 +573,8 @@ export class House {
       pos[i * 3 + 2] = BOUNDS.minZ + Math.random() * 16;
     }
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 1.4, 0), 14);
     const mat = new THREE.PointsMaterial({
       color: 0x9999aa, size: 0.018, transparent: true, opacity: 0.4,
       blending: THREE.AdditiveBlending, depthWrite: false,
@@ -551,7 +586,8 @@ export class House {
   /* ---------------- runtime ---------------- */
 
   getColliders() {
-    const out = this.staticColliders.slice();
+    const out = this.colliders;
+    out.length = this.staticColliders.length;
     for (const d of this.doors) {
       const box = d.aabb();
       if (box) out.push(box);
@@ -566,8 +602,7 @@ export class House {
 
   setBlackout(on) {
     this.blackout = on;
-    const all = [...this.bulbs, ...this.windowLights];
-    for (const l of all) l.intensity = on ? 0 : l.userData.base;
+    for (const l of this.electricLights) l.intensity = on ? 0 : l.userData.base;
     this.hemi.intensity = on ? 0.05 : 0.22;
     for (const b of this.bulbs) if (b.userData.mesh) b.userData.mesh.material.emissiveIntensity = on ? 0 : 1.4;
   }
@@ -584,12 +619,12 @@ export class House {
     // light behavior
     if (this.flickerTime > 0) {
       this.flickerTime -= dt;
-      for (const l of [...this.bulbs, ...this.windowLights]) {
+      for (const l of this.electricLights) {
         l.intensity = Math.random() < 0.45 ? 0 : l.userData.base * (0.3 + Math.random());
         if (l.userData.mesh) l.userData.mesh.material.emissiveIntensity = l.intensity > 0 ? 1.4 : 0;
       }
       if (this.flickerTime <= 0 && !this.blackout) {
-        for (const l of [...this.bulbs, ...this.windowLights]) {
+        for (const l of this.electricLights) {
           l.intensity = l.userData.base;
           if (l.userData.mesh) l.userData.mesh.material.emissiveIntensity = 1.4;
         }

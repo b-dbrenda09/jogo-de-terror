@@ -186,7 +186,7 @@ export function fabric(baseR = 46, baseG = 38, baseB = 40) {
 }
 
 /**
- * A pale gaunt face — reused for the entity, portraits, jumpscare.
+ * A pale gaunt face for the portraits.
  * variant 0: staring · 1: mouth torn wide open · 2: hollow black eyes
  */
 export function drawFace(ctx, size, intensity = 1, variant = 0) {
@@ -267,20 +267,72 @@ export function drawFace(ctx, size, intensity = 1, variant = 0) {
   }
 }
 
-export function ghostFaceTexture(variant = 0) {
-  const c = makeCanvas(512, 512);
-  drawFace(c.getContext('2d'), 512, 1, variant);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
+export function ghostSmokeTexture() {
+  const c = makeCanvas(32, 32);
+  const ctx = c.getContext('2d');
+  const falloff = ctx.createRadialGradient(14, 15, 1, 16, 16, 16);
+  falloff.addColorStop(0, 'rgba(255,255,255,0.86)');
+  falloff.addColorStop(0.45, 'rgba(255,255,255,0.42)');
+  falloff.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = falloff;
+  ctx.fillRect(0, 0, 32, 32);
+  return new THREE.CanvasTexture(c);
 }
 
 export function ghostFaceDataURL() {
-  const c = makeCanvas(512, 512);
+  const c = makeCanvas(384, 384);
   const ctx = c.getContext('2d');
-  drawFace(ctx, 512, 1.15, 1); // mouth torn wide for the kill screen
-  // extra noise for the fullscreen jumpscare
-  speckle(ctx, 0, 0, 512, 512, 2200, 0.25, false);
+  const skin = ctx.createRadialGradient(150, 85, 18, 192, 171, 190);
+  skin.addColorStop(0, '#5b5759');
+  skin.addColorStop(0.48, '#303035');
+  skin.addColorStop(1, '#060608');
+  ctx.fillStyle = skin;
+  ctx.beginPath();
+  ctx.moveTo(72, 384);
+  ctx.bezierCurveTo(90, 323, 147, 325, 158, 282);
+  ctx.bezierCurveTo(105, 233, 106, 174, 106, 122);
+  ctx.bezierCurveTo(106, 66, 121, 32, 154, 29);
+  ctx.bezierCurveTo(172, 8, 216, 44, 238, 56);
+  ctx.bezierCurveTo(258, 80, 264, 123, 265, 151);
+  ctx.bezierCurveTo(284, 196, 247, 265, 227, 300);
+  ctx.bezierCurveTo(229, 342, 311, 332, 330, 384);
+  ctx.closePath();
+  ctx.fill();
+
+  for (const [x, y, angle] of [[148, 157, -0.19], [218, 166, 0.16]]) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+    const socket = ctx.createRadialGradient(0, 0, 4, 0, 0, 32);
+    socket.addColorStop(0.3, '#08080b');
+    socket.addColorStop(1, 'rgba(8,8,11,0)');
+    ctx.fillStyle = socket;
+    ctx.fillRect(-32, -32, 64, 64);
+    ctx.strokeStyle = '#464146';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(-18, -9);
+    ctx.quadraticCurveTo(0, -20, 17, -9);
+    ctx.stroke();
+    ctx.fillStyle = '#a7abaa';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 7, 2.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.fillStyle = '#09070b';
+  ctx.beginPath();
+  ctx.moveTo(126, 203);
+  ctx.bezierCurveTo(151, 229, 203, 251, 244, 209);
+  ctx.bezierCurveTo(223, 266, 155, 251, 126, 203);
+  ctx.fill();
+  ctx.strokeStyle = '#625851';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(141, 217);
+  ctx.bezierCurveTo(168, 239, 207, 245, 235, 218);
+  ctx.stroke();
+  speckle(ctx, 0, 0, 384, 384, 1100, 0.12, true);
   return c.toDataURL();
 }
 
@@ -326,27 +378,15 @@ export function cobweb() {
 export function flashlightCookie() {
   const c = makeCanvas(256, 256);
   const ctx = c.getContext('2d');
-  const grad = ctx.createRadialGradient(128, 128, 8, 128, 128, 128);
-  grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.4, 'rgba(235,235,235,0.95)');
-  grad.addColorStop(0.75, 'rgba(140,140,140,0.55)');
-  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  const grad = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+  grad.addColorStop(0, '#fff');
+  grad.addColorStop(0.22, '#fff');
+  grad.addColorStop(0.48, '#e8e8e8');
+  grad.addColorStop(0.72, '#a0a0a0');
+  grad.addColorStop(0.9, '#363636');
+  grad.addColorStop(1, '#000');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, 256, 256);
-  // faint lens rings + dirt
-  ctx.strokeStyle = 'rgba(0,0,0,0.07)';
-  for (const r of [54, 88, 112]) {
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.arc(128, 128, r, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-  for (let i = 0; i < 40; i++) {
-    ctx.fillStyle = `rgba(0,0,0,${0.03 + Math.random() * 0.05})`;
-    ctx.beginPath();
-    ctx.arc(rand(30, 226), rand(30, 226), rand(2, 7), 0, Math.PI * 2);
-    ctx.fill();
-  }
   const tex = new THREE.CanvasTexture(c);
   return tex;
 }

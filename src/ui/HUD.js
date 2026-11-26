@@ -18,6 +18,7 @@ export class HUD {
       battery: document.getElementById('battery'),
       burn: document.getElementById('burn'),
       burnFill: document.getElementById('burn-fill'),
+      performance: document.getElementById('performance-stats'),
     };
     this.el.grain.style.backgroundImage = `url(${grainDataURL()})`;
     this._grainPhase = 0;
@@ -45,24 +46,39 @@ export class HUD {
   }
 
   setBattery(pct) {
+    pct = Math.round(pct);
+    if (pct === this.batteryValue) return;
+    this.batteryValue = pct;
     this.el.batteryFill.style.width = `${Math.max(0, pct)}%`;
     this.el.batteryFill.style.background = pct < 20 ? '#7e1212' : pct < 45 ? '#7a6a3f' : '#5d7a4f';
     this.el.battery.classList.toggle('dying', pct < 20);
   }
 
   setBurn(meter) {
+    const percent = meter > 0.02 ? Math.max(1, Math.round(Math.min(100, meter * 100))) : 0;
+    if (percent === this.burnValue) return;
+    this.burnValue = percent;
     if (meter > 0.02) {
       this.el.burn.classList.remove('hidden');
-      this.el.burnFill.style.width = `${Math.min(100, meter * 100)}%`;
+      this.el.burnFill.style.width = `${percent}%`;
     } else {
       this.el.burn.classList.add('hidden');
     }
   }
 
   setPrompt(text) {
+    if (text === this.promptText) return;
+    this.promptText = text;
     if (!text) { this.el.prompt.classList.add('hidden'); return; }
     this.el.prompt.classList.remove('hidden');
     this.el.prompt.innerHTML = `<kbd>E</kbd>${text}`;
+  }
+
+  showPerformance(show) { this.el.performance.classList.toggle('hidden', !show); }
+
+  setPerformance(fps, { render, memory }) {
+    this.el.performance.textContent = `${fps.toFixed(1)} FPS · ${render.calls} draws · ` +
+      `${render.triangles} tris · ${memory.geometries} geo · ${memory.textures} tex`;
   }
 
   toast(text, ms = 2600) {

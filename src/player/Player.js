@@ -5,7 +5,13 @@ const EYE_HEIGHT = 1.62;
 const RADIUS = 0.32;
 const WALK_SPEED = 2.3;
 const SPRINT_SPEED = 4.3;
-const BEAM_INTENSITY = 26;
+const FLASHLIGHT = {
+  intensity: 32,   // Intensidade luminosa no centro do feixe.
+  range: 24.7,     // Distância máxima que a luz alcança no cenário.
+  angle: 0.75,     // Meio-ângulo do cone em radianos, medido a partir do eixo.
+  penumbra: 0.65,  // Fração do cone usada para suavizar as bordas.
+  decay: 2,        // Atenuação com a distância, seguindo a queda quadrática.
+};
 const DRAIN_PER_SEC = 0.55;   // idle flashlight drain
 const BURN_DRAIN_PER_SEC = 5; // extra drain while burning him
 
@@ -19,6 +25,9 @@ export class Player {
     this.yaw = 0;                  // facing north (-z), into the house
     this.pitch = 0;
     this.velocity = new THREE.Vector3();
+    this.wish = new THREE.Vector3();
+    this.beamDirection = new THREE.Vector3();
+    this.camera.rotation.order = 'YXZ';
     this.keys = {};
     this.enabled = false;
     this.bobPhase = 0;
@@ -34,17 +43,15 @@ export class Player {
   }
 
   _buildFlashlight() {
-    this.flashlight = new THREE.SpotLight(0xfff2d8, BEAM_INTENSITY, 19, 0.5, 0.55, 2.0);
+    const { intensity, range, angle, penumbra, decay } = FLASHLIGHT;
+    this.flashlight = new THREE.SpotLight(0xfff2d8, intensity, range, angle, penumbra, decay);
     this.flashlight.map = flashlightCookie();
     this.flashlight.castShadow = true;
     this.flashlight.shadow.mapSize.set(1024, 1024);
     this.flashlight.shadow.camera.near = 0.2;
-    this.flashlight.shadow.camera.far = 20;
     this.flashlight.shadow.bias = -0.004;
     this.flashTarget = new THREE.Object3D();
     this.flashlight.target = this.flashTarget;
-    // smooth lag on the beam
-    this.aimDir = new THREE.Vector3(0, 0, -1);
   }
 
   addTo(scene) {
@@ -55,7 +62,7 @@ export class Player {
   _bindInput() {
     document.addEventListener('keydown', (e) => {
       this.keys[e.code] = true;
-      if (e.code === 'KeyF' && this.enabled) {
+      if (e.code === 'KeyF' && !e.repeat && this.enabled) {
         if (!this.flashlightOn && this.battery <= 0) {
           this.audio?.click();
           return; // dead cell — nothing happens
@@ -108,34 +115,35 @@ export class Player {
     }
 
     // --- movement ---
-    const speed = this.isSprinting ? SPRINT_SPEED : WALK_SPEED;
-    const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-    const right = new THREE.Vector3(-forward.z, 0, forward.x);
-    const wish = new THREE.Vector3();
-    if (this.keys['KeyW']) wish.add(forward);
-    if (this.keys['KeyS']) wish.sub(forward);
-    if (this.keys['KeyD']) wish.add(right);
-    if (this.keys['KeyA']) wish.sub(right);
-    if (wish.lengthSq() > 0) wish.normalize().multiplyScalar(speed);
+    const sprinting = this.isSprinting;
+    const speed = sprinting ? SPRINT_SPEED : WALK_SPEED;
+    const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
+    const forward = Number(!!this.keys.KeyW) - Number(!!this.keys.KeyS);
+    const right = Number(!!this.keys.KeyD) - Number(!!this.keys.KeyA);
+    this.wish.set(right * cos - forward * sin, 0, -forward * cos - right * sin);
+    this.wish.normalize().multiplyScalar(speed);
 
-    // smooth accel
-    this.velocity.x += (wish.x - this.velocity.x) * Math.min(1, dt * 11);
-    this.velocity.z += (wish.z - this.velocity.z) * Math.min(1, dt * 11);
-
-    const step = this.velocity.clone().multiplyScalar(dt);
-    this.position.x += step.x;
-    this._resolveCollisions(colliders, 'x');
-    this.position.z += step.z;
-    this._resolveCollisions(colliders, 'z');
+    // Keep each collision step small even on slow frames.
+    const steps = Math.max(1, Math.ceil(dt / (1 / 60)));
+    const stepTime = dt / steps;
+    const acceleration = 1 - Math.exp(-11 * stepTime);
+    const startX = this.position.x, startZ = this.position.z;
+    for (let step = 0; step < steps; step++) {
+      this.velocity.lerp(this.wish, acceleration);
+      this.position.x += this.velocity.x * stepTime;
+      this._resolveCollisions(colliders, 'x');
+      this.position.z += this.velocity.z * stepTime;
+      this._resolveCollisions(colliders, 'z');
+    }
 
     // --- footsteps (alternating stereo) ---
-    const moved = Math.hypot(step.x, step.z);
+    const moved = Math.hypot(this.position.x - startX, this.position.z - startZ);
     this.stepDistance += moved;
-    const strideLen = this.isSprinting ? 2.0 : 1.45;
+    const strideLen = sprinting ? 2.0 : 1.45;
     if (this.stepDistance > strideLen && moved > 0.001) {
       this.stepDistance = 0;
       this.stepSide *= -1;
-      this.audio?.footstep(this.isSprinting, this.stepSide * 0.13);
+      this.audio?.footstep(sprinting, this.stepSide * 0.13);
     }
 
     // --- head bob ---
@@ -165,27 +173,25 @@ export class Player {
 
   _updateCamera(bob) {
     this.camera.position.set(this.position.x, EYE_HEIGHT + bob, this.position.z);
-    this.camera.rotation.order = 'YXZ';
     this.camera.rotation.y = this.yaw;
     this.camera.rotation.x = this.pitch;
   }
 
   _updateFlashlight(dt) {
-    // beam follows view with a touch of lag for weight
-    const target = new THREE.Vector3(0, 0, -1).applyEuler(this.camera.rotation);
-    this.aimDir.lerp(target, Math.min(1, dt * 9));
+    // Mantém o feixe paralelo à visão, com a origem ligeiramente abaixo da câmera.
+    this.beamDirection.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
     this.flashlight.position.copy(this.camera.position);
     this.flashlight.position.y -= 0.12;
-    this.flashTarget.position.copy(this.camera.position).addScaledVector(this.aimDir, 8);
+    this.flashTarget.position.copy(this.flashlight.position).addScaledVector(this.beamDirection, 8);
 
-    let intensity = this.beamActive ? BEAM_INTENSITY : 0;
+    let intensity = this.beamActive ? FLASHLIGHT.intensity : 0;
     // weak cell sputters below 20%
-    if (this.beamActive && this.battery < 20 && Math.random() < 0.06) {
+    if (this.beamActive && this.battery < 20 && Math.random() < 1 - Math.pow(0.94, dt * 60)) {
       intensity *= Math.random() * 0.5;
     }
     if (this.flickerTime > 0 && this.beamActive) {
       this.flickerTime -= dt;
-      if (Math.random() < 0.4) intensity = Math.random() * 8;
+      if (Math.random() < 1 - Math.pow(0.6, dt * 60)) intensity = Math.random() * 8;
     }
     this.flashlight.intensity = intensity;
   }

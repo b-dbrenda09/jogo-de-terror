@@ -14,29 +14,50 @@ import { HUD } from './ui/HUD.js';
 const TOTAL_KEYS = 3;
 const BURN_RANGE = 10;       // how far the beam reaches him
 const BATTERY_REFILL = 45;
+const GRAPHICS = {
+  low: { scale: 0.7, maxRatio: 0.8, pixels: 1100000, shadowSize: 256, bloomScale: 0, dust: 64, smoke: 16 },
+  medium: { scale: 0.9, maxRatio: 1.25, pixels: 2100000, shadowSize: 512, bloomScale: 0.65, dust: 144, smoke: 32 },
+  high: { scale: 1, maxRatio: 1.75, pixels: 3700000, shadowSize: 1024, bloomScale: 1, dust: 240, smoke: 50 },
+};
 
 export class Game {
-  constructor(canvas) {
+  constructor(canvas, { quality = 'medium', showFPS = false } = {}) {
     this.canvas = canvas;
+    this.graphics = GRAPHICS[quality] ?? GRAPHICS.medium;
+    this.showFPS = showFPS;
+    this.statsElapsed = 0;
+    this.statsFrames = 0;
+    this.promptTimer = 0;
+    this.audioTimer = 0;
+    this.rayCenter = new THREE.Vector2();
+    this.rayHits = [];
+    this.toGhost = new THREE.Vector3();
+    this.viewDirection = new THREE.Vector3();
+    this.shadowPosition = new THREE.Vector3(Infinity, 0, 0);
+    this.shadowTarget = new THREE.Vector3();
+    this.shadowChair = new THREE.Vector3();
     this.state = 'title'; // title | playing | caught | escaped
     this.keysFound = 0;
     this.chaseActive = false;
     this.escaping = false;
     this.startTime = 0;
     this.banishes = 0;
+  }
 
+  _initialize() {
     this._setupRenderer();
     this._setupScene();
 
     this.hud = new HUD();
-    this.audio = new AudioEngine();
-    this.house = new House(this.scene);
+    this.house = new House(this.scene, this.graphics.dust, this.graphics.bloomScale > 0);
     this.player = new Player(this.camera, this.canvas, this.audio);
     this.player.addTo(this.scene);
-    this.ghost = new Ghost(this.scene);
+    this.player.flashlight.shadow.mapSize.setScalar(this.graphics.shadowSize);
+    this.ghost = new Ghost(this.scene, this.graphics.smoke);
     this.director = new ScareDirector(this);
 
     this._setupComposer();
+    this._resize();
 
     this.raycaster = new THREE.Raycaster();
     this.raycaster.far = 2.6;
@@ -44,26 +65,43 @@ export class Game {
     this._bindEvents();
 
     this.clock = new THREE.Clock();
-    this.renderer.setAnimationLoop(() => this._tick());
   }
 
   /* ---------------- setup ---------------- */
 
   _setupRenderer() {
-    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer = new THREE.WebGLRenderer({
+      canvas: this.canvas,
+      antialias: this.graphics.bloomScale === 1,
+    });
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.autoUpdate = false;
+    this.renderer.shadowMap.type = this.graphics.shadowSize === 256
+      ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
+    this.renderer.info.autoReset = false;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     window.addEventListener('resize', () => {
-      this.camera.aspect = window.innerWidth / window.innerHeight;
-      this.camera.updateProjectionMatrix();
-      this.renderer.setSize(window.innerWidth, window.innerHeight);
-      this.composer?.setSize(window.innerWidth, window.innerHeight);
+      this._resize();
+      if (this.state !== 'playing') this._render(0);
     });
+  }
+
+  _resize() {
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const ratio = Math.min(window.devicePixelRatio * this.graphics.scale,
+      this.graphics.maxRatio, Math.sqrt(this.graphics.pixels / (width * height)));
+    this.camera.aspect = width / height;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setPixelRatio(ratio);
+    this.renderer.setSize(width, height);
+    if (this.composer) {
+      this.composer.setPixelRatio(ratio);
+      this.composer.setSize(width, height);
+      this.bloom.setSize(width * ratio * this.graphics.bloomScale, height * ratio * this.graphics.bloomScale);
+    }
   }
 
   _setupScene() {
@@ -74,12 +112,13 @@ export class Game {
   }
 
   _setupComposer() {
+    if (!this.graphics.bloomScale) return;
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     // subtle bloom: candle flames, key glints, his eyes
-    const bloom = new UnrealBloomPass(
+    this.bloom = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight), 0.42, 0.7, 0.62);
-    this.composer.addPass(bloom);
+    this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
   }
 
@@ -93,11 +132,10 @@ export class Game {
         document.getElementById('pause-screen').classList.add('hidden');
       }
     });
-    document.getElementById('pause-screen').addEventListener('click', () => {
-      this.canvas.requestPointerLock();
-    });
+    document.addEventListener('pointerlockerror', () => this._showPointerLockRetry());
+    document.getElementById('pause-screen').addEventListener('click', () => this._requestPointerLock());
     document.addEventListener('keydown', (e) => {
-      if (e.code === 'KeyE' && this.state === 'playing') {
+      if (e.code === 'KeyE' && !e.repeat && this.state === 'playing') {
         if (this.hud.noteOpen) this.hud.hideNote();
         else this._tryInteract();
       }
@@ -106,18 +144,38 @@ export class Game {
     document.getElementById('again-btn').addEventListener('click', () => location.reload());
   }
 
+  _requestPointerLock() {
+    try {
+      // Browsers can report rejection by event or promise.
+      this.canvas.requestPointerLock()?.catch(() => this._showPointerLockRetry());
+    } catch {
+      this._showPointerLockRetry();
+    }
+  }
+
+  _showPointerLockRetry() {
+    if (this.state === 'playing' && document.pointerLockElement !== this.canvas) {
+      document.getElementById('pause-screen').classList.remove('hidden');
+    }
+  }
+
   /* ---------------- flow ---------------- */
 
   start() {
-    this.state = 'playing';
-    this.startTime = performance.now();
+    this.audio = new AudioEngine();
     this.audio.resume();
+    this.state = 'playing';
+    this._requestPointerLock();
+    this._initialize();
+    this.player.enabled = document.pointerLockElement === this.canvas;
+    this.startTime = performance.now();
     this.audio.startAmbient();
     this.hud.show();
+    this.hud.showPerformance(this.showFPS);
     this.hud.setObjective('Find the three brass keys');
     this.hud.setKeys(0, TOTAL_KEYS);
     this.hud.setBattery(this.player.battery);
-    this.canvas.requestPointerLock();
+    this.renderer.setAnimationLoop(() => this._tick());
     // an unwelcome welcome
     setTimeout(() => this.audio.doorCreak(), 1200);
     setTimeout(() => this.audio.thump(0.3), 4200);
@@ -126,6 +184,8 @@ export class Game {
   _onCaught() {
     if (this.state !== 'playing') return;
     this.state = 'caught';
+    this.renderer.setAnimationLoop(null);
+    this.hud.showPerformance(false);
     this.player.enabled = false;
     document.exitPointerLock();
     this.audio.scream();
@@ -145,6 +205,8 @@ export class Game {
 
   _onEscaped() {
     this.state = 'escaped';
+    this.renderer.setAnimationLoop(null);
+    this.hud.showPerformance(false);
     this.player.enabled = false;
     this.audio.stopHeartbeat();
     this.audio.stopChaseMusic();
@@ -227,14 +289,15 @@ export class Game {
     this.ghost.vanish(); // clear any stalker — he is gathering himself
     // a dead beat of silence... then everything goes wrong
     setTimeout(() => {
+      if (this.state !== 'playing') return;
       this.house.setBlackout(true);
       this.player.flashlightFlicker(1.6);
       this.audio.staticBurst(0.35);
     }, 1400);
     setTimeout(() => {
+      if (this.state !== 'playing') return;
       this.audio.scream();
-      this.hud.flash('#300000', 0.65, 260);
-      this.hud.shake();
+      this.hud.flash('#300000', 0.26, 260);
       this.hud.setDanger(true);
       this.audio.setDroneIntensity(1);
       this.audio.startHeartbeat(96);
@@ -248,9 +311,11 @@ export class Game {
   }
 
   _lookTarget() {
-    this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
-    const hits = this.raycaster.intersectObjects(this.house.interactables, false);
-    return hits.length ? hits[0].object : null;
+    this.camera.updateMatrixWorld();
+    this.rayHits.length = 0;
+    this.raycaster.setFromCamera(this.rayCenter, this.camera);
+    this.raycaster.intersectObjects(this.house.interactables, false, this.rayHits);
+    return this.rayHits[0]?.object ?? null;
   }
 
   /* ---------------- fight back: the beam burns him ---------------- */
@@ -258,15 +323,14 @@ export class Game {
   _updateBurn(dt) {
     let burning = false;
     if (this.ghost.engaged && this.player.beamActive) {
-      const head = this.ghost.group.position.clone();
-      head.y = 1.9;
-      const toGhost = head.sub(this.camera.position);
-      const dist = toGhost.length();
-      if (dist < BURN_RANGE) {
-        const forward = new THREE.Vector3(0, 0, -1).applyEuler(this.camera.rotation);
-        const angle = forward.angleTo(toGhost.normalize());
+      this.toGhost.copy(this.ghost.group.position).setY(1.9).sub(this.camera.position);
+      const distanceSquared = this.toGhost.lengthSq();
+      if (distanceSquared > 0 && distanceSquared < BURN_RANGE * BURN_RANGE) {
+        const dist = Math.sqrt(distanceSquared);
+        this.viewDirection.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
         // generous cone up close, tight at range
-        if (angle < 0.22 + 0.9 / Math.max(dist, 1)) burning = true;
+        burning = this.viewDirection.dot(this.toGhost) >
+          dist * Math.cos(0.22 + 0.9 / Math.max(dist, 1));
       }
     }
 
@@ -300,7 +364,9 @@ export class Game {
   /* ---------------- main loop ---------------- */
 
   _tick() {
-    const dt = Math.min(this.clock.getDelta(), 0.05);
+    const elapsed = this.clock.getDelta();
+    // Bound catch-up after a long tab suspension. Player movement substeps this interval.
+    const dt = Math.min(elapsed, 0.5);
     const t = this.clock.elapsedTime;
 
     this.house.update(dt, t);
@@ -310,29 +376,38 @@ export class Game {
       this.director.update(dt, this.player.position);
 
       const caught = this.ghost.update(dt, this.player.position, t);
-      if (caught) this._onCaught();
+      if (caught) {
+        this._onCaught();
+        this._render(elapsed);
+        return;
+      }
 
       this._updateBurn(dt);
       this.hud.setBattery(this.player.battery);
 
       // his breathing closes in with him
+      this.audioTimer -= dt;
       if (this.ghost.engaged) {
-        const d = this.ghost.distanceTo(this.player.position);
-        this.audio.setBreathLevel(THREE.MathUtils.clamp(1.3 - d / 9, 0, 1));
         this.hud.setDanger(true);
       } else {
-        this.audio.setBreathLevel(0);
         if (!this.chaseActive) this.hud.setDanger(false);
       }
 
       // heartbeat tempo scales with how close he is
-      if (this.chaseActive && this.ghost.mode !== 'hidden') {
+      if (this.audioTimer <= 0) {
+        this.audioTimer = 0.1;
         const d = this.ghost.distanceTo(this.player.position);
-        this.audio.startHeartbeat(Math.round(THREE.MathUtils.clamp(160 - d * 9, 88, 160) / 8) * 8);
+        this.audio.setBreathLevel(this.ghost.engaged ? THREE.MathUtils.clamp(1.3 - d / 9, 0, 1) : 0);
+        if (this.chaseActive && this.ghost.mode !== 'hidden') {
+          this.audio.startHeartbeat(Math.round(THREE.MathUtils.clamp(160 - d * 9, 88, 160) / 8) * 8);
+        }
       }
 
       // interact prompt
-      if (!this.hud.noteOpen) {
+      this.promptTimer -= dt;
+      if (this.hud.noteOpen) this.hud.setPrompt(null);
+      else if (this.promptTimer <= 0) {
+        this.promptTimer = 0.05;
         const target = this._lookTarget();
         if (target) {
           const type = target.userData.interact.type;
@@ -343,7 +418,7 @@ export class Game {
             : type === 'frontdoor' ? (this.keysFound >= TOTAL_KEYS ? 'Unlock the front door' : 'Front door')
             : 'Door');
         } else this.hud.setPrompt(null);
-      } else this.hud.setPrompt(null);
+      }
 
       // escape: step through the open front door
       if (this.escaping && this.player.position.z > 7.5 &&
@@ -352,6 +427,37 @@ export class Game {
       }
     }
 
-    this.composer.render();
+    this._render(elapsed);
+  }
+
+  _render(elapsed) {
+    const { flashlight, flashTarget } = this.player;
+    const chair = this.house.props.kitchenChair.position;
+    const threshold = 0.000025;
+    if (this.player.beamActive &&
+        (this.shadowPosition.distanceToSquared(flashlight.position) > threshold ||
+         this.shadowTarget.distanceToSquared(flashTarget.position) > threshold ||
+         !this.shadowChair.equals(chair))) {
+      this.renderer.shadowMap.needsUpdate = true;
+      this.shadowPosition.copy(flashlight.position);
+      this.shadowTarget.copy(flashTarget.position);
+      this.shadowChair.copy(chair);
+    }
+    if (!this.player.beamActive) this.shadowPosition.x = Infinity;
+
+    const info = this.renderer.info;
+    info.reset();
+    if (this.composer) this.composer.render(elapsed);
+    else this.renderer.render(this.scene, this.camera);
+    if (this.state === 'playing') this.director.onRendered();
+    if (this.showFPS && this.state === 'playing') {
+      this.statsElapsed += elapsed;
+      this.statsFrames++;
+      if (this.statsElapsed >= 0.75) {
+        this.hud.setPerformance(this.statsFrames / this.statsElapsed, info);
+        this.statsElapsed = 0;
+        this.statsFrames = 0;
+      }
+    }
   }
 }
