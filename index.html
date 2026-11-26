@@ -261,16 +261,12 @@
 
   <script>
     const startupStatus = document.getElementById('start-status');
-    if (location.protocol === 'file:') {
-      startupStatus.textContent = 'Open the hosted game or serve dist/index.html with Live Server.';
-    } else {
-      window.addEventListener('load', () => {
-        if (!document.getElementById('start-btn').disabled || startupStatus.textContent) return;
-        startupStatus.textContent = document.querySelector('script[src="./src/main.js"]')
-          ? 'Open dist/index.html with Live Server to play the compiled game.'
-          : 'The game could not load. Reload the page and try again.';
-      }, { once: true });
-    }
+    window.addEventListener('load', () => {
+      if (!document.getElementById('start-btn').disabled || startupStatus.textContent) return;
+      startupStatus.textContent = document.querySelector('script[src="./src/main.js"]')
+        ? 'Open dist/index.html in your browser to play the compiled game.'
+        : 'The game could not load. Reload the page and try again.';
+    }, { once: true });
   </script>
   <script type="module" src="./src/main.js"></script>
 </body>

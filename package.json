@@ -12,7 +12,6 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "postbuild": "node -e \"require('node:fs').copyFileSync('LICENSE', 'dist/LICENSE')\"",
     "preview": "vite preview"
   },
   "dependencies": {
