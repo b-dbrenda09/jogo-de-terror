@@ -7,6 +7,11 @@
  */
 export class AudioEngine {
   constructor() {
+    try { this._initialize(); }
+    catch (error) { this.ctx?.close()?.catch(() => {}); throw error; }
+  }
+
+  _initialize() {
     this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.9;
@@ -31,7 +36,35 @@ export class AudioEngine {
     this.distortionCurves = new Map();
   }
 
-  resume() { if (this.ctx.state === 'suspended') this.ctx.resume(); }
+  resume() { if (this.ctx.state === 'suspended') return this.ctx.resume(); }
+
+  // Sound is optional: unsupported APIs, rejected resume promises and device failures
+  // must never prevent scene creation or stop the render loop.
+  static optional(onFailure = () => {}) {
+    let engine = null, failed = false;
+    const fail = error => {
+      if (failed) return;
+      failed = true;
+      try { engine?.stopHeartbeat(); engine?.stopChaseMusic(); } catch { /* Best-effort cleanup. */ }
+      try { engine?.ctx?.close()?.catch(() => {}); } catch { /* A broken audio device is optional. */ }
+      onFailure(error);
+    };
+    try { engine = new AudioEngine(); } catch (error) { fail(error); }
+    const methods = new Map();
+    return new Proxy({}, { get(_target, key) {
+      if (key === 'available') return !failed && Boolean(engine);
+      if (key === 'ctx') return engine?.ctx;
+      if (!methods.has(key)) methods.set(key, (...args) => {
+        if (failed || !engine) return;
+        try {
+          const result = engine[key](...args);
+          if (result?.then) return result.catch(fail);
+          return result;
+        } catch (error) { fail(error); }
+      });
+      return methods.get(key);
+    } });
+  }
   get now() { return this.ctx.currentTime; }
 
   /* ================= primitives ================= */

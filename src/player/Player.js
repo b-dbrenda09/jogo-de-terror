@@ -60,7 +60,10 @@ export class Player {
   }
 
   _bindInput() {
+    this.inputEvents = new AbortController();
+    const options = { signal: this.inputEvents.signal };
     document.addEventListener('keydown', (e) => {
+      if (!this.enabled) return;
       this.keys[e.code] = true;
       if (e.code === 'KeyF' && !e.repeat && this.enabled) {
         if (!this.flashlightOn && this.battery <= 0) {
@@ -70,15 +73,17 @@ export class Player {
         this.flashlightOn = !this.flashlightOn;
         this.audio?.click();
       }
-    });
-    document.addEventListener('keyup', (e) => { this.keys[e.code] = false; });
+    }, options);
+    document.addEventListener('keyup', (e) => { this.keys[e.code] = false; }, options);
     document.addEventListener('mousemove', (e) => {
       if (!this.enabled || document.pointerLockElement !== this.dom) return;
       this.yaw -= e.movementX * 0.0021;
       this.pitch -= e.movementY * 0.0021;
       this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch));
-    });
+    }, options);
   }
+
+  dispose() { this.enabled = false; this.keys = {}; this.inputEvents?.abort(); }
 
   get isMoving() {
     return this.keys['KeyW'] || this.keys['KeyA'] || this.keys['KeyS'] || this.keys['KeyD'];

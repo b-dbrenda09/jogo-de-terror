@@ -14,6 +14,7 @@ import { HUD } from './ui/HUD.js';
 const TOTAL_KEYS = 3;
 const BURN_RANGE = 10;       // how far the beam reaches him
 const BATTERY_REFILL = 45;
+const canvasOwner = new WeakMap();
 const GRAPHICS = {
   low: { scale: 0.7, maxRatio: 0.8, pixels: 1100000, shadowSize: 256, bloomScale: 0, dust: 64, smoke: 16 },
   medium: { scale: 0.9, maxRatio: 1.25, pixels: 2100000, shadowSize: 512, bloomScale: 0.65, dust: 144, smoke: 32 },
@@ -23,6 +24,7 @@ const GRAPHICS = {
 export class Game {
   constructor(canvas, { quality = 'medium', showFPS = false } = {}) {
     this.canvas = canvas;
+    canvasOwner.set(canvas, this);
     this.graphics = GRAPHICS[quality] ?? GRAPHICS.medium;
     this.showFPS = showFPS;
     this.statsElapsed = 0;
@@ -42,20 +44,36 @@ export class Game {
     this.escaping = false;
     this.startTime = 0;
     this.banishes = 0;
+    this.events = new AbortController();
+    this.debugStartup = new URLSearchParams(location.search).has('debugStartup');
+    this.startupStage = 'idle';
+  }
+
+  _trace(stage) {
+    this.startupStage = stage;
+    if (!this.debugStartup) return;
+    console.info('[startup]', stage);
+    window.dispatchEvent(new CustomEvent('bridge-startup', { detail: { stage, game: this } }));
   }
 
   _initialize() {
+    this._trace('renderer');
     this._setupRenderer();
+    this._trace('scene');
     this._setupScene();
 
     this.hud = new HUD();
+    this._trace('house');
     this.house = new House(this.scene, this.graphics.dust, this.graphics.bloomScale > 0);
+    this._trace('player');
     this.player = new Player(this.camera, this.canvas, this.audio);
     this.player.addTo(this.scene);
     this.player.flashlight.shadow.mapSize.setScalar(this.graphics.shadowSize);
+    this._trace('monster');
     this.ghost = new Ghost(this.scene, this.graphics.smoke);
     this.director = new ScareDirector(this);
 
+    this._trace('composer');
     this._setupComposer();
     this._resize();
 
@@ -63,6 +81,8 @@ export class Game {
     this.raycaster.far = 2.6;
 
     this.clock = new THREE.Clock();
+    // Prepare the real camera/beam even if mouse capture needs another click.
+    this.player.update(0, this.house.getColliders());
   }
 
   /* ---------------- setup ---------------- */
@@ -83,7 +103,7 @@ export class Game {
     window.addEventListener('resize', () => {
       this._resize();
       if (this.state !== 'playing') this._render(0);
-    });
+    }, { signal: this.events.signal });
   }
 
   _resize() {
@@ -125,48 +145,77 @@ export class Game {
     const pauseStatus = document.getElementById('pause-status');
     document.addEventListener('pointerlockchange', () => {
       const locked = document.pointerLockElement === this.canvas;
+      this._trace(locked ? 'pointer-lock-acquired' : 'pointer-lock-released');
+      clearTimeout(this.lockTimer); this.lockPending = false;
+      if (!this.player) return;
       this.player.enabled = locked && this.state === 'playing';
+      this.player.keys = {};
+      this.clock?.getDelta();
       pauseStatus.textContent = '';
       pauseScreen.classList.toggle('hidden', locked || this.state !== 'playing');
-    });
-    document.addEventListener('pointerlockerror', () => this._showPointerLockRetry());
-    pauseScreen.addEventListener('click', () => this._requestPointerLock());
+    }, { signal: this.events.signal });
+    document.addEventListener('pointerlockerror', () => this._showPointerLockRetry(), { signal: this.events.signal });
+    pauseScreen.addEventListener('click', () => this._requestPointerLock(), { signal: this.events.signal });
     document.addEventListener('keydown', (e) => {
-      if (e.code === 'KeyE' && !e.repeat && this.state === 'playing') {
+      if (e.code === 'KeyE' && !e.repeat && this.state === 'playing' && this.player?.enabled) {
         if (this.hud.noteOpen) this.hud.hideNote();
         else this._tryInteract();
       }
-    });
-    document.getElementById('retry-btn').addEventListener('click', () => location.reload());
-    document.getElementById('again-btn').addEventListener('click', () => location.reload());
+    }, { signal: this.events.signal });
+    document.getElementById('retry-btn').addEventListener('click', () => location.reload(), { signal: this.events.signal });
+    document.getElementById('again-btn').addEventListener('click', () => location.reload(), { signal: this.events.signal });
   }
 
   _requestPointerLock() {
+    if (this.lockPending || document.pointerLockElement === this.canvas) return;
+    this._trace('pointer-lock-request');
+    this.lockPending = true;
     try {
+      if (typeof this.canvas.requestPointerLock !== 'function') throw new Error('Pointer Lock is not supported by this browser.');
       // Browsers can report rejection by event or promise.
-      this.canvas.requestPointerLock()?.catch(() => this._showPointerLockRetry());
-    } catch {
-      this._showPointerLockRetry();
+      this.canvas.requestPointerLock()?.then(() => {
+        if (canvasOwner.get(this.canvas) === this && this.state === 'failed' && document.pointerLockElement === this.canvas) document.exitPointerLock();
+      }).catch(error => this._showPointerLockRetry(error));
+      this.lockTimer = setTimeout(() => {
+        if (document.pointerLockElement !== this.canvas) this._showPointerLockRetry(new Error('Mouse capture timed out.'));
+      }, 3000);
+    } catch (error) {
+      this._showPointerLockRetry(error);
     }
   }
 
-  _showPointerLockRetry() {
+  _showPointerLockRetry(error) {
+    clearTimeout(this.lockTimer); this.lockPending = false;
+    this.lockError = error?.message ?? 'The browser denied mouse capture.';
+    this._trace('pointer-lock-failed');
     if (this.state === 'playing' && document.pointerLockElement !== this.canvas) {
+      this.player.enabled = false; this.player.keys = {};
       document.getElementById('pause-screen').classList.remove('hidden');
       document.getElementById('pause-status').textContent =
-        'The browser could not capture the mouse. Click to retry. If you are in an embedded preview, open the game URL in its own tab.';
+        'The game is ready, but the browser could not capture the mouse. Click to retry. Allow mouse capture and use a desktop browser. In an embedded preview, open the game URL in its own tab.';
     }
   }
 
   /* ---------------- flow ---------------- */
 
   start() {
-    this.audio = new AudioEngine();
+    if (this.state !== 'title') return;
+    this._trace('start');
+    this.state = 'starting';
+    this._bindEvents();
+    // Request within the original trusted click, BEFORE expensive procedural setup
+    // and without awaiting anything. Old browsers may return void, newer ones a promise.
+    this._requestPointerLock();
+    this._trace('audio');
+    this.audio = AudioEngine.optional(error => {
+      console.warn('Audio unavailable; continuing without sound:', error);
+      this._trace('audio-unavailable');
+    });
     this.audio.resume();
     this._initialize();
-    this._bindEvents();
     this.state = 'playing';
-    this._requestPointerLock();
+    this._trace('state-playing');
+    this.player.enabled = document.pointerLockElement === this.canvas;
     this.startTime = performance.now();
     this.audio.startAmbient();
     this.hud.show();
@@ -175,6 +224,8 @@ export class Game {
     this.hud.setKeys(0, TOTAL_KEYS);
     this.hud.setBattery(this.player.battery);
     this.renderer.setAnimationLoop(() => this._tick());
+    this._trace('render-loop-started');
+    if (!this.player.enabled && !this.lockPending) this._showPointerLockRetry();
     // an unwelcome welcome
     setTimeout(() => this.audio.doorCreak(), 1200);
     setTimeout(() => this.audio.thump(0.3), 4200);
@@ -363,6 +414,7 @@ export class Game {
   /* ---------------- main loop ---------------- */
 
   _tick() {
+    if (!this.firstFrame) { this.firstFrame = true; this._trace('first-frame'); }
     const elapsed = this.clock.getDelta();
     // Bound catch-up after a long tab suspension. Player movement substeps this interval.
     const dt = Math.min(elapsed, 0.5);
@@ -370,7 +422,7 @@ export class Game {
 
     this.house.update(dt, t);
 
-    if (this.state === 'playing') {
+    if (this.state === 'playing' && this.player.enabled) {
       this.player.update(dt, this.house.getColliders());
       this.director.update(dt, this.player.position);
 
@@ -448,6 +500,7 @@ export class Game {
     info.reset();
     if (this.composer) this.composer.render(elapsed);
     else this.renderer.render(this.scene, this.camera);
+    if (!this.firstRendered) { this.firstRendered = true; this._trace('first-render-completed'); }
     if (this.state === 'playing') this.director.onRendered();
     if (this.showFPS && this.state === 'playing') {
       this.statsElapsed += elapsed;
@@ -458,5 +511,29 @@ export class Game {
         this.statsFrames = 0;
       }
     }
+  }
+
+  abortStartup() {
+    // A void-returning legacy request may acquire the mouse AFTER setup throws.
+    // Keep a short-lived cleanup listener so the title never retains a stale lock.
+    const releaseLateLock = () => {
+      document.removeEventListener('pointerlockchange', releaseLateLock);
+      if (canvasOwner.get(this.canvas) === this && this.state === 'failed' && document.pointerLockElement === this.canvas) document.exitPointerLock();
+    };
+    document.addEventListener('pointerlockchange', releaseLateLock);
+    setTimeout(() => document.removeEventListener('pointerlockchange', releaseLateLock), 5000);
+    this.state = 'failed'; clearTimeout(this.lockTimer); this.events.abort();
+    this.renderer?.setAnimationLoop(null); this.player?.dispose(); this.hud?.dispose();
+    this.audio?.ctx?.close()?.catch(() => {});
+    this.composer?.dispose(); this.bloom?.dispose();
+    this.scene?.traverse(object => {
+      object.geometry?.dispose();
+      const materials = object.material ? (Array.isArray(object.material) ? object.material : [object.material]) : [];
+      for (const material of materials) { for (const value of Object.values(material)) if (value?.isTexture) value.dispose(); material.dispose(); }
+      object.shadow?.dispose();
+    });
+    this.renderer?.dispose();
+    if (document.pointerLockElement === this.canvas) document.exitPointerLock();
+    document.getElementById('pause-screen').classList.add('hidden');
   }
 }

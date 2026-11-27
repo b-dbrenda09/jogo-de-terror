@@ -26,18 +26,24 @@ settings.addEventListener('change', () => {
   }
 });
 
+let game;
 title.addEventListener('click', (event) => {
   if (button.disabled || settings.contains(event.target)) return;
   button.disabled = true;
+  status.textContent = '';
 
   try {
-    const game = new Game(canvas, { quality: quality.value, showFPS: showFPS.checked });
+    game ??= new Game(canvas, { quality: quality.value, showFPS: showFPS.checked });
+    game._trace('start-click');
     game.start();
     title.classList.add('hidden');
+    game._trace('menu-hidden');
   } catch (error) {
-    if (document.pointerLockElement === canvas) document.exitPointerLock();
+    const stage = game?.startupStage ?? 'start';
+    game?.abortStartup(); game = null;
     console.error('Could not start Bridge Horror House:', error);
-    status.textContent = 'The game could not start. Reload the page and try again.';
+    status.textContent = `The game could not start (${stage}). ${error.message} Click to try again.`;
+    button.disabled = false;
   }
 });
 

@@ -1,0 +1,56 @@
+[
+  {
+    "url": "http://127.0.0.1:5501/dist/index.html",
+    "scenario": "normal",
+    "moved": 0.8872697970630226,
+    "rotated": -0.10709999999999999,
+    "renderedFrames": 18,
+    "audio": true,
+    "stages": [
+      "start-click",
+      "start",
+      "pointer-lock-request",
+      "audio",
+      "renderer",
+      "scene",
+      "house",
+      "player",
+      "monster",
+      "composer",
+      "state-playing",
+      "render-loop-started",
+      "menu-hidden",
+      "first-frame",
+      "first-render-completed",
+      "pointer-lock-acquired"
+    ]
+  },
+  {
+    "url": "http://127.0.0.1:5501/dist/index.html",
+    "scenario": "pointer-promise",
+    "moved": 0.8071040375332359,
+    "rotated": -0.105,
+    "renderedFrames": 22,
+    "audio": true,
+    "stages": [
+      "start-click",
+      "start",
+      "pointer-lock-request",
+      "audio",
+      "renderer",
+      "scene",
+      "house",
+      "player",
+      "monster",
+      "composer",
+      "state-playing",
+      "render-loop-started",
+      "menu-hidden",
+      "pointer-lock-failed",
+      "first-frame",
+      "first-render-completed",
+      "pointer-lock-request",
+      "pointer-lock-acquired"
+    ]
+  }
+]

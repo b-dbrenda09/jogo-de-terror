@@ -28,7 +28,7 @@ export class HUD {
 
   _animateGrain() {
     // shuffle the noise tile every other frame — analog film feel
-    setInterval(() => {
+    this.grainTimer = setInterval(() => {
       this._grainPhase = (this._grainPhase + 1) % 4;
       const x = (this._grainPhase * 53) % 160;
       const y = (this._grainPhase * 97) % 160;
@@ -37,6 +37,7 @@ export class HUD {
   }
 
   show() { this.el.hud.classList.remove('hidden'); }
+  dispose() { clearInterval(this.grainTimer); clearTimeout(this.toastTimer); this.hide(); }
   hide() { this.el.hud.classList.add('hidden'); }
 
   setObjective(text) { this.el.objective.textContent = text; }

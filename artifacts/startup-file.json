@@ -1,0 +1,83 @@
+[
+  {
+    "url": "file:///C:/Users/Informatica/OneDrive/Desktop/modificando%20jogo/bridge-horror-house/dist/index.html",
+    "scenario": "normal",
+    "moved": 0.7655845219432313,
+    "rotated": -0.10709999999999999,
+    "renderedFrames": 18,
+    "audio": true,
+    "stages": [
+      "start-click",
+      "start",
+      "pointer-lock-request",
+      "audio",
+      "renderer",
+      "scene",
+      "house",
+      "player",
+      "monster",
+      "composer",
+      "state-playing",
+      "render-loop-started",
+      "menu-hidden",
+      "first-frame",
+      "first-render-completed",
+      "pointer-lock-acquired"
+    ]
+  },
+  {
+    "url": "file:///C:/Users/Informatica/OneDrive/Desktop/modificando%20jogo/bridge-horror-house/dist/index.html",
+    "scenario": "audio-constructor",
+    "moved": 1.0241817999394636,
+    "rotated": -0.10709999999999999,
+    "renderedFrames": 10,
+    "audio": false,
+    "stages": [
+      "start-click",
+      "start",
+      "pointer-lock-request",
+      "audio",
+      "audio-unavailable",
+      "renderer",
+      "scene",
+      "house",
+      "player",
+      "monster",
+      "composer",
+      "state-playing",
+      "render-loop-started",
+      "menu-hidden",
+      "first-frame",
+      "first-render-completed",
+      "pointer-lock-acquired"
+    ]
+  },
+  {
+    "url": "file:///C:/Users/Informatica/OneDrive/Desktop/modificando%20jogo/bridge-horror-house/dist/index.html",
+    "scenario": "pointer-promise",
+    "moved": 0.8306883446090643,
+    "rotated": -0.105,
+    "renderedFrames": 20,
+    "audio": true,
+    "stages": [
+      "start-click",
+      "start",
+      "pointer-lock-request",
+      "audio",
+      "renderer",
+      "scene",
+      "house",
+      "player",
+      "monster",
+      "composer",
+      "state-playing",
+      "render-loop-started",
+      "menu-hidden",
+      "pointer-lock-failed",
+      "first-frame",
+      "first-render-completed",
+      "pointer-lock-request",
+      "pointer-lock-acquired"
+    ]
+  }
+]

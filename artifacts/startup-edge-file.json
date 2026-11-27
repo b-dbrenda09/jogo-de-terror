@@ -1,0 +1,56 @@
+[
+  {
+    "url": "file:///C:/Users/Informatica/OneDrive/Desktop/modificando%20jogo/bridge-horror-house/dist/index.html",
+    "scenario": "normal",
+    "moved": 0.8165646125702466,
+    "rotated": -0.10709999999999999,
+    "renderedFrames": 19,
+    "audio": true,
+    "stages": [
+      "start-click",
+      "start",
+      "pointer-lock-request",
+      "audio",
+      "renderer",
+      "scene",
+      "house",
+      "player",
+      "monster",
+      "composer",
+      "state-playing",
+      "render-loop-started",
+      "menu-hidden",
+      "first-frame",
+      "first-render-completed",
+      "pointer-lock-acquired"
+    ]
+  },
+  {
+    "url": "file:///C:/Users/Informatica/OneDrive/Desktop/modificando%20jogo/bridge-horror-house/dist/index.html",
+    "scenario": "pointer-promise",
+    "moved": 0.7705826346382665,
+    "rotated": -0.105,
+    "renderedFrames": 17,
+    "audio": true,
+    "stages": [
+      "start-click",
+      "start",
+      "pointer-lock-request",
+      "audio",
+      "renderer",
+      "scene",
+      "house",
+      "player",
+      "monster",
+      "composer",
+      "state-playing",
+      "render-loop-started",
+      "menu-hidden",
+      "pointer-lock-failed",
+      "first-frame",
+      "first-render-completed",
+      "pointer-lock-request",
+      "pointer-lock-acquired"
+    ]
+  }
+]
