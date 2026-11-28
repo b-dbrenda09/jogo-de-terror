@@ -27,8 +27,8 @@ settings.addEventListener('change', () => {
 });
 
 let game;
-title.addEventListener('click', (event) => {
-  if (button.disabled || settings.contains(event.target)) return;
+button.addEventListener('click', () => {
+  if (button.disabled) return;
   button.disabled = true;
   status.textContent = '';
 

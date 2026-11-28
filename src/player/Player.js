@@ -162,10 +162,13 @@ export class Player {
 
   _resolveCollisions(colliders, axis) {
     for (const b of colliders) {
-      const cx = Math.max(b.minX, Math.min(this.position.x, b.maxX));
-      const cz = Math.max(b.minZ, Math.min(this.position.z, b.maxZ));
-      const dx = this.position.x - cx;
-      const dz = this.position.z - cz;
+      const { x, z } = this.position;
+      if (x <= b.minX - RADIUS || x >= b.maxX + RADIUS ||
+          z <= b.minZ - RADIUS || z >= b.maxZ + RADIUS) continue;
+      const cx = Math.max(b.minX, Math.min(x, b.maxX));
+      const cz = Math.max(b.minZ, Math.min(z, b.maxZ));
+      const dx = x - cx;
+      const dz = z - cz;
       const distSq = dx * dx + dz * dz;
       if (distSq < RADIUS * RADIUS) {
         const dist = Math.sqrt(distSq) || 0.0001;

@@ -277,9 +277,14 @@
     const startupStatus = document.getElementById('start-status');
     window.addEventListener('load', () => {
       if (!document.getElementById('start-btn').disabled || startupStatus.textContent) return;
-      startupStatus.textContent = document.querySelector('script[src="./src/main.js"]')
-        ? 'Open dist/index.html in your browser to play the compiled game.'
-        : 'The game could not load. Reload the page and try again.';
+      if (location.protocol === 'file:' && document.querySelector('script[src="./src/main.js"]')) {
+        const offlineGame = document.createElement('a');
+        offlineGame.href = './dist/index.html';
+        offlineGame.textContent = 'Open dist/index.html to play offline';
+        startupStatus.replaceChildren(offlineGame);
+      } else {
+        startupStatus.textContent = 'The game could not load. Reload the page and try again.';
+      }
     }, { once: true });
   </script>
   <script type="module" src="./src/main.js"></script>

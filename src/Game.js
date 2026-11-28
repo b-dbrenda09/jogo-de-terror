@@ -5,19 +5,21 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { House } from './world/House.js';
 import { ghostFaceDataURL } from './world/Textures.js';
-import { Player } from './player/Player.js';
+import { EYE_HEIGHT, Player } from './player/Player.js';
 import { AudioEngine } from './systems/AudioEngine.js';
 import { Ghost } from './systems/Ghost.js';
 import { ScareDirector } from './systems/ScareDirector.js';
 import { HUD } from './ui/HUD.js';
 
 const TOTAL_KEYS = 3;
+const KEY_PICKUP_DISTANCE = 1.2;
+const KEY_PICKUP_DISTANCE_SQUARED = KEY_PICKUP_DISTANCE ** 2;
 const BURN_RANGE = 10;       // how far the beam reaches him
 const BATTERY_REFILL = 45;
 const canvasOwner = new WeakMap();
 const GRAPHICS = {
-  low: { scale: 0.7, maxRatio: 0.8, pixels: 1100000, shadowSize: 256, bloomScale: 0, dust: 64, smoke: 16 },
-  medium: { scale: 0.9, maxRatio: 1.25, pixels: 2100000, shadowSize: 512, bloomScale: 0.65, dust: 144, smoke: 32 },
+  low: { scale: 0.65, maxRatio: 0.75, pixels: 900000, shadowSize: 256, shadowInterval: 1 / 30, bloomScale: 0, dust: 64, smoke: 16, lowDetail: true },
+  medium: { scale: 0.82, maxRatio: 1.1, pixels: 1700000, shadowSize: 512, bloomScale: 0.5, dust: 144, smoke: 32 },
   high: { scale: 1, maxRatio: 1.75, pixels: 3700000, shadowSize: 1024, bloomScale: 1, dust: 240, smoke: 50 },
 };
 
@@ -33,11 +35,14 @@ export class Game {
     this.audioTimer = 0;
     this.rayCenter = new THREE.Vector2();
     this.rayHits = [];
+    this.keyReachOrigin = new THREE.Vector3();
+    this.keyReachTarget = new THREE.Vector3();
     this.toGhost = new THREE.Vector3();
     this.viewDirection = new THREE.Vector3();
     this.shadowPosition = new THREE.Vector3(Infinity, 0, 0);
     this.shadowTarget = new THREE.Vector3();
     this.shadowChair = new THREE.Vector3();
+    this.lastShadowUpdate = -Infinity;
     this.state = 'title'; // title | playing | caught | escaped
     this.keysFound = 0;
     this.chaseActive = false;
@@ -64,7 +69,7 @@ export class Game {
 
     this.hud = new HUD();
     this._trace('house');
-    this.house = new House(this.scene, this.graphics.dust, this.graphics.bloomScale > 0);
+    this.house = new House(this.scene, this.graphics.dust, this.graphics.bloomScale > 0, this.graphics.lowDetail);
     this._trace('player');
     this.player = new Player(this.camera, this.canvas, this.audio);
     this.player.addTo(this.scene);
@@ -162,8 +167,8 @@ export class Game {
         else this._tryInteract();
       }
     }, { signal: this.events.signal });
-    document.getElementById('retry-btn').addEventListener('click', () => location.reload(), { signal: this.events.signal });
-    document.getElementById('again-btn').addEventListener('click', () => location.reload(), { signal: this.events.signal });
+    document.getElementById('retry-btn').addEventListener('click', () => this._restart(), { signal: this.events.signal });
+    document.getElementById('again-btn').addEventListener('click', () => this._restart(), { signal: this.events.signal });
   }
 
   _requestPointerLock() {
@@ -213,6 +218,9 @@ export class Game {
     });
     this.audio.resume();
     this._initialize();
+    // Keep the title and its retry path active until WebGL produces a frame.
+    this._trace('first-render');
+    this._render(0);
     this.state = 'playing';
     this._trace('state-playing');
     this.player.enabled = document.pointerLockElement === this.canvas;
@@ -227,8 +235,8 @@ export class Game {
     this._trace('render-loop-started');
     if (!this.player.enabled && !this.lockPending) this._showPointerLockRetry();
     // an unwelcome welcome
-    setTimeout(() => this.audio.doorCreak(), 1200);
-    setTimeout(() => this.audio.thump(0.3), 4200);
+    this.welcomeCreak = setTimeout(() => this.audio.doorCreak(), 1200);
+    this.welcomeThump = setTimeout(() => this.audio.thump(0.3), 4200);
   }
 
   _onCaught() {
@@ -283,7 +291,6 @@ export class Game {
     if (!hit) return;
     const info = hit.userData.interact;
     switch (info.type) {
-      case 'key': this._takeKey(info); break;
       case 'battery':
         this.house.removeBattery(info.group);
         this.player.addBattery(BATTERY_REFILL);
@@ -312,14 +319,32 @@ export class Game {
     }
   }
 
-  _takeKey(info) {
-    this.house.removeKey(info.group);
+  _collectNearbyKeys() {
+    const { keys } = this.house;
+    if (keys.length === 0) return;
+    const { position } = this.player;
+    this.keyReachOrigin.set(position.x, position.y - 0.45, position.z);
+    for (let i = keys.length - 1; i >= 0; i--) {
+      const key = keys[i];
+      const { x, z } = key.position;
+      const y = key.userData.baseY;
+      // Measure from the player's body, including keys on the floor or furniture.
+      const reachY = THREE.MathUtils.clamp(y, position.y - EYE_HEIGHT + 0.25, position.y);
+      if ((position.x - x) ** 2 + (reachY - y) ** 2 + (position.z - z) ** 2 > KEY_PICKUP_DISTANCE_SQUARED) continue;
+
+      this.keyReachTarget.set(x, y, z);
+      if (!this.house.keyPathBlocked(this.keyReachOrigin, this.keyReachTarget)) this._takeKey(key);
+    }
+  }
+
+  _takeKey(key) {
+    if (!this.house.removeKey(key)) return;
     this.keysFound++;
     this.audio.pickup();
     this.hud.setKeys(this.keysFound, TOTAL_KEYS);
     this.hud.flash('#211a08', 0.3, 120);
 
-    if (info.id === 'study') this.director.studyKeyScare();
+    if (key.userData.id === 'study') this.director.studyKeyScare();
 
     if (this.keysFound >= TOTAL_KEYS) {
       this._beginFinale();
@@ -424,6 +449,7 @@ export class Game {
 
     if (this.state === 'playing' && this.player.enabled) {
       this.player.update(dt, this.house.getColliders());
+      this._collectNearbyKeys();
       this.director.update(dt, this.player.position);
 
       const caught = this.ghost.update(dt, this.player.position, t);
@@ -463,8 +489,7 @@ export class Game {
         if (target) {
           const type = target.userData.interact.type;
           this.hud.setPrompt(
-            type === 'key' ? 'Take the key'
-            : type === 'battery' ? 'Take the batteries'
+            type === 'battery' ? 'Take the batteries'
             : type === 'note' ? 'Read'
             : type === 'frontdoor' ? (this.keysFound >= TOTAL_KEYS ? 'Unlock the front door' : 'Front door')
             : 'Door');
@@ -485,11 +510,15 @@ export class Game {
     const { flashlight, flashTarget } = this.player;
     const chair = this.house.props.kitchenChair.position;
     const threshold = 0.000025;
-    if (this.player.beamActive &&
+    const time = this.clock.elapsedTime;
+    const shadowReady = this.shadowPosition.x === Infinity ||
+      time - this.lastShadowUpdate >= (this.graphics.shadowInterval ?? 0);
+    if (this.player.beamActive && shadowReady &&
         (this.shadowPosition.distanceToSquared(flashlight.position) > threshold ||
          this.shadowTarget.distanceToSquared(flashTarget.position) > threshold ||
          !this.shadowChair.equals(chair))) {
       this.renderer.shadowMap.needsUpdate = true;
+      this.lastShadowUpdate = time;
       this.shadowPosition.copy(flashlight.position);
       this.shadowTarget.copy(flashTarget.position);
       this.shadowChair.copy(chair);
@@ -522,18 +551,49 @@ export class Game {
     };
     document.addEventListener('pointerlockchange', releaseLateLock);
     setTimeout(() => document.removeEventListener('pointerlockchange', releaseLateLock), 5000);
-    this.state = 'failed'; clearTimeout(this.lockTimer); this.events.abort();
-    this.renderer?.setAnimationLoop(null); this.player?.dispose(); this.hud?.dispose();
-    this.audio?.ctx?.close()?.catch(() => {});
-    this.composer?.dispose(); this.bloom?.dispose();
-    this.scene?.traverse(object => {
-      object.geometry?.dispose();
-      const materials = object.material ? (Array.isArray(object.material) ? object.material : [object.material]) : [];
-      for (const material of materials) { for (const value of Object.values(material)) if (value?.isTexture) value.dispose(); material.dispose(); }
-      object.shadow?.dispose();
-    });
-    this.renderer?.dispose();
+    this.state = 'failed';
+    this._disposeGame();
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
     document.getElementById('pause-screen').classList.add('hidden');
+  }
+
+  async _restart() {
+    this.state = 'restarting';
+    try {
+      await this._disposeGame();
+    } finally {
+      location.reload();
+    }
+  }
+
+  _disposeGame() {
+    clearTimeout(this.lockTimer);
+    clearTimeout(this.welcomeCreak);
+    clearTimeout(this.welcomeThump);
+    this.events.abort();
+    this.renderer?.setAnimationLoop(null); this.player?.dispose(); this.hud?.dispose();
+    this.audio?.stopHeartbeat();
+    this.audio?.stopChaseMusic();
+    const context = this.audio?.ctx;
+    const audioClosed = context && context.state !== 'closed' ? context.close().catch(() => {}) : undefined;
+    for (const pass of this.composer?.passes ?? []) pass.dispose();
+    this.composer?.dispose();
+    const resources = new Set();
+    this.scene?.traverse(object => {
+      if (object.isInstancedMesh) object.dispose();
+      if (object.geometry) resources.add(object.geometry);
+      if (object.skeleton) resources.add(object.skeleton);
+      if (object.map?.isTexture) resources.add(object.map);
+      const materials = object.material ? (Array.isArray(object.material) ? object.material : [object.material]) : [];
+      for (const material of materials) {
+        if (resources.has(material)) continue;
+        resources.add(material);
+        for (const value of Object.values(material)) if (value?.isTexture) resources.add(value);
+      }
+      object.shadow?.dispose();
+    });
+    for (const resource of resources) resource.dispose();
+    this.renderer?.dispose();
+    return audioClosed;
   }
 }

@@ -25,169 +25,263 @@ function speckle(ctx, x, y, w, h, count, alpha, dark = true) {
   }
 }
 
-/** Aged wooden floorboards. */
+
+function weathering(ctx, size, count, rgb, opacity, stretch = 1) {
+  for (let i = 0; i < count; i++) {
+    const x = rand(0, size), y = rand(0, size), r = rand(size * 0.03, size * 0.24);
+    for (const dx of [-size, 0, size]) for (const dy of [-size, 0, size]) {
+      if (Math.abs(x + dx - size / 2) > size / 2 + r ||
+          Math.abs(y + dy - size / 2) > size / 2 + r * stretch) continue;
+      ctx.save();
+      ctx.translate(x + dx, y + dy);
+      ctx.scale(1, stretch);
+      const smudge = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+      smudge.addColorStop(0, `rgba(${rgb},${opacity})`);
+      smudge.addColorStop(0.63, `rgba(${rgb},${opacity * 0.38})`);
+      smudge.addColorStop(1, `rgba(${rgb},0)`);
+      ctx.fillStyle = smudge;
+      ctx.fillRect(-r, -r, r * 2, r * 2);
+      ctx.restore();
+    }
+  }
+}
+
+function fracture(ctx, x, y, dx, dy, segments) {
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  for (let i = 0; i < segments; i++) {
+    x += dx * rand(0.4, 1.2);
+    y += dy + rand(-4, 4);
+    ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  return [x, y];
+}
+
+function grain(ctx, width, height, count) {
+  for (let i = 0; i < count; i++) {
+    const y = rand(0, height), phase = rand(0, Math.PI * 2);
+    const sway = rand(0.4, 3.5);
+    ctx.strokeStyle = i % 4 === 0 ? 'rgba(192,139,86,0.18)' : 'rgba(24,14,10,0.34)';
+    ctx.lineWidth = rand(0.45, 1.65);
+    ctx.beginPath();
+    ctx.moveTo(0, y + Math.sin(phase) * sway);
+    for (let x = 8; x <= width; x += 8) {
+      const a = x / width * Math.PI * 2;
+      ctx.lineTo(x, y + Math.sin(a + phase) * sway + Math.sin(3 * a) * 0.5);
+    }
+    ctx.stroke();
+  }
+}
+
 export function woodFloor() {
   const c = makeCanvas(512, 512);
   const ctx = c.getContext('2d');
-  const plankH = 64;
   for (let row = 0; row < 8; row++) {
-    const y = row * plankH;
-    const base = 38 + rand(-10, 12);
-    ctx.fillStyle = `rgb(${base + 18},${base + 6},${base - 6})`;
-    ctx.fillRect(0, y, 512, plankH);
-    // grain streaks
-    for (let g = 0; g < 26; g++) {
-      const gy = y + rand(2, plankH - 2);
-      ctx.strokeStyle = `rgba(${base - 14},${base - 20},${base - 26},${rand(0.15, 0.45)})`;
-      ctx.lineWidth = rand(0.5, 1.6);
+    const y = row * 64, seam = rand(75, 435);
+    const leftTone = rand(58, 87);
+    const rightTone = leftTone + rand(7, 15) * (row % 2 ? 1 : -1);
+    ctx.save();
+    ctx.translate(0, y);
+    ctx.beginPath();
+    ctx.rect(0, 0, 512, 64);
+    ctx.clip();
+    // Blend across the tile boundary, which runs through a board.
+    const boardColor = tone => `rgb(${tone + 18},${tone},${tone - 16})`;
+    const boards = ctx.createLinearGradient(0, 0, 512, 0);
+    const split = seam / 512;
+    const wrapTone = (leftTone + rightTone) / 2;
+    boards.addColorStop(0, boardColor(wrapTone));
+    boards.addColorStop(split * 0.45, boardColor(leftTone));
+    boards.addColorStop(split, boardColor(leftTone));
+    boards.addColorStop(split + 0.002, boardColor(rightTone));
+    boards.addColorStop(split + (1 - split) * 0.55, boardColor(rightTone));
+    boards.addColorStop(1, boardColor(wrapTone));
+    ctx.fillStyle = boards;
+    ctx.fillRect(0, 0, 512, 64);
+    const wear = ctx.createLinearGradient(seam, 0, seam + 72, 0);
+    wear.addColorStop(0, row % 2 ? 'rgba(181,133,89,0.35)' : 'rgba(26,17,12,0.35)');
+    wear.addColorStop(1, 'rgba(105,79,58,0)');
+    ctx.fillStyle = wear;
+    ctx.fillRect(seam, 0, 72, 64);
+    grain(ctx, 512, 64, 90);
+    const kx = rand(24, 488), ky = rand(15, 49);
+    for (let ring = 1; ring < 6; ring++) {
+      ctx.strokeStyle = 'rgba(33,19,12,0.46)';
       ctx.beginPath();
-      ctx.moveTo(0, gy);
-      for (let x = 0; x <= 512; x += 32) ctx.lineTo(x, gy + rand(-2.5, 2.5));
+      ctx.ellipse(kx, ky, ring * 3.8, ring * 0.95, -0.08, 0, Math.PI * 2);
       ctx.stroke();
     }
-    // plank seams + stagger
-    ctx.fillStyle = 'rgba(0,0,0,0.65)';
-    ctx.fillRect(0, y, 512, 2);
-    const seamX = ((row * 197) % 512);
-    ctx.fillRect(seamX, y, 2, plankH);
-    // knots
-    if (Math.random() < 0.7) {
-      const kx = rand(30, 480), ky = y + rand(12, plankH - 12);
-      const grad = ctx.createRadialGradient(kx, ky, 1, kx, ky, rand(4, 9));
-      grad.addColorStop(0, 'rgba(15,9,5,0.9)');
-      grad.addColorStop(1, 'rgba(15,9,5,0)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(kx - 10, ky - 10, 20, 20);
+    speckle(ctx, 0, 0, 512, 64, 190, 0.2);
+    ctx.strokeStyle = 'rgba(219,175,125,0.31)';
+    ctx.lineWidth = 0.75;
+    for (let i = 0; i < 7; i++) fracture(ctx, rand(10, 475), rand(7, 57), rand(1, 5), 0, 5);
+    ctx.strokeStyle = '#302016';
+    fracture(ctx, seam, rand(12, 50), -7, 0, 7);
+    ctx.fillStyle = '#231812';
+    ctx.fillRect(0, 0, 512, 2.5);
+    ctx.fillRect(seam, 0, 2.3, 64);
+    ctx.fillStyle = 'rgba(221,176,126,0.29)';
+    ctx.fillRect(0, 3, 512, 1);
+    ctx.fillRect(seam + 2.3, 3, 1, 61);
+    for (const x of [seam - 7, seam + 9]) {
+      for (const y of [12, 50]) {
+        ctx.fillStyle = '#352a20';
+        ctx.beginPath();
+        ctx.arc(x, y, 1.45, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
-    speckle(ctx, 0, y, 512, plankH, 220, 0.1);
+    ctx.restore();
   }
-  // big dark stains
-  for (let s = 0; s < 5; s++) {
-    const sx = rand(0, 512), sy = rand(0, 512), r = rand(30, 90);
-    const grad = ctx.createRadialGradient(sx, sy, 2, sx, sy, r);
-    grad.addColorStop(0, 'rgba(8,5,3,0.5)');
-    grad.addColorStop(1, 'rgba(8,5,3,0)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(sx - r, sy - r, r * 2, r * 2);
-  }
+  weathering(ctx, 512, 12, '23,22,16', 0.47, 0.53);
+  weathering(ctx, 512, 8, '166,134,92', 0.24, 0.35);
   return toTexture(c);
 }
 
-/** Stained striped Victorian wallpaper. */
 export function wallpaper() {
   const c = makeCanvas(512, 512);
   const ctx = c.getContext('2d');
-  ctx.fillStyle = '#4a4234';
+  ctx.fillStyle = '#655b46';
   ctx.fillRect(0, 0, 512, 512);
-  // vertical stripes
   for (let x = 0; x < 512; x += 64) {
-    ctx.fillStyle = 'rgba(62,52,38,1)';
-    ctx.fillRect(x, 0, 32, 512);
-    ctx.fillStyle = 'rgba(86,74,52,0.5)';
-    ctx.fillRect(x + 34, 0, 4, 512);
-  }
-  // damask-ish motifs
-  ctx.fillStyle = 'rgba(34,28,20,0.55)';
-  for (let x = 16; x < 512; x += 64) {
-    for (let y = 24; y < 512; y += 96) {
-      ctx.beginPath();
-      ctx.ellipse(x, y, 7, 12, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.ellipse(x, y + 48, 4, 7, 0, 0, Math.PI * 2);
-      ctx.fill();
+    ctx.fillStyle = '#5e5541';
+    ctx.fillRect(x + 2, 0, 15, 512);
+    ctx.fillStyle = '#756951';
+    ctx.fillRect(x + 18, 0, 1, 512);
+    for (let y = 0; y < 512; y += 64) {
+      ctx.save();
+      ctx.translate(x + 42, y + 32);
+      ctx.fillStyle = 'rgba(47,52,39,0.66)';
+      for (const side of [-1, 1]) {
+        ctx.save();
+        ctx.scale(side, 1);
+        ctx.beginPath();
+        ctx.moveTo(0, 25);
+        ctx.bezierCurveTo(1, 2, 27, 9, 18, -7);
+        ctx.bezierCurveTo(14, -15, 6, -6, 12, -4);
+        ctx.bezierCurveTo(14, 4, 1, -3, 1, -13);
+        ctx.quadraticCurveTo(1, -19, 0, -25);
+        ctx.quadraticCurveTo(8, -18, 10, -12);
+        ctx.bezierCurveTo(26, -22, 31, 13, 8, 15);
+        ctx.quadraticCurveTo(5, 18, 0, 25);
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.restore();
     }
   }
-  speckle(ctx, 0, 0, 512, 512, 1400, 0.12);
-  // water damage drips from top
-  for (let d = 0; d < 9; d++) {
-    const dx = rand(0, 512), dw = rand(8, 30), dh = rand(60, 280);
-    const grad = ctx.createLinearGradient(0, 0, 0, dh);
-    grad.addColorStop(0, 'rgba(18,13,8,0.55)');
-    grad.addColorStop(1, 'rgba(18,13,8,0)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(dx, 0, dw, dh);
+  weathering(ctx, 512, 9, '170,150,117', 0.67);
+  for (const [x, y, width, height] of [[112, 391, 57, 81], [403, 149, 32, 82], [245, 464, 29, 34]]) {
+    ctx.save();
+    ctx.beginPath();
+    for (let i = 0; i < 18; i++) {
+      const angle = i / 18 * Math.PI * 2;
+      const edge = rand(0.55, 1);
+      ctx.lineTo(x + Math.cos(angle) * width * edge, y + Math.sin(angle) * height * edge);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#827664';
+    ctx.fill();
+    ctx.strokeStyle = '#342c22';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.clip();
+    speckle(ctx, x - width, y - height, width * 2, height * 2, 650, 0.28);
+    ctx.strokeStyle = '#b0a086';
+    ctx.lineWidth = 6;
+    ctx.translate(-2, -4);
+    ctx.stroke();
+    ctx.restore();
   }
-  // mold patches near bottom
-  for (let m = 0; m < 14; m++) {
-    const mx = rand(0, 512), my = rand(380, 512), r = rand(8, 36);
-    const grad = ctx.createRadialGradient(mx, my, 1, mx, my, r);
-    grad.addColorStop(0, 'rgba(14,18,10,0.6)');
-    grad.addColorStop(1, 'rgba(14,18,10,0)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(mx - r, my - r, r * 2, r * 2);
-  }
+  weathering(ctx, 512, 15, '38,36,23', 0.56, 1.5);
+  speckle(ctx, 0, 0, 512, 512, 2400, 0.2);
   return toTexture(c);
 }
 
-/** Cracked plaster ceiling. */
 export function plaster() {
   const c = makeCanvas(512, 512);
   const ctx = c.getContext('2d');
-  ctx.fillStyle = '#56504a';
+  ctx.fillStyle = '#777066';
   ctx.fillRect(0, 0, 512, 512);
-  speckle(ctx, 0, 0, 512, 512, 2600, 0.1);
-  // cracks
-  ctx.strokeStyle = 'rgba(20,16,12,0.7)';
-  for (let k = 0; k < 7; k++) {
-    let x = rand(0, 512), y = rand(0, 512);
-    ctx.lineWidth = rand(0.6, 1.4);
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    for (let s = 0; s < 14; s++) {
-      x += rand(-40, 40); y += rand(-40, 40);
-      ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-  }
-  // stains
-  for (let s = 0; s < 6; s++) {
-    const sx = rand(0, 512), sy = rand(0, 512), r = rand(40, 110);
-    const grad = ctx.createRadialGradient(sx, sy, 4, sx, sy, r);
-    grad.addColorStop(0, 'rgba(40,30,16,0.4)');
-    grad.addColorStop(1, 'rgba(40,30,16,0)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(sx - r, sy - r, r * 2, r * 2);
+  weathering(ctx, 512, 18, '53,42,27', 0.53);
+  weathering(ctx, 512, 10, '181,167,145', 0.39);
+  speckle(ctx, 0, 0, 512, 512, 4800, 0.24);
+  speckle(ctx, 0, 0, 512, 512, 2500, 0.19, false);
+  for (let i = 0; i < 13; i++) {
+    ctx.strokeStyle = 'rgba(42,35,25,0.62)';
+    ctx.lineWidth = rand(0.5, 1.5);
+    const [x, y] = fracture(ctx, rand(25, 445), rand(25, 460), rand(2, 7), rand(-4, 5), 8);
+    ctx.lineWidth *= 0.55;
+    fracture(ctx, x, y, -3, -4, 5);
+    fracture(ctx, x, y, 4, 2, 6);
   }
   return toTexture(c);
 }
 
-/** Dark old furniture wood. */
 export function darkWood() {
   const c = makeCanvas(256, 256);
   const ctx = c.getContext('2d');
-  ctx.fillStyle = '#241710';
+  ctx.fillStyle = '#4c3225';
   ctx.fillRect(0, 0, 256, 256);
-  for (let g = 0; g < 60; g++) {
-    const gy = rand(0, 256);
-    ctx.strokeStyle = `rgba(${rand(10, 30)},${rand(6, 18)},${rand(3, 10)},${rand(0.2, 0.6)})`;
-    ctx.lineWidth = rand(0.5, 2);
-    ctx.beginPath();
-    ctx.moveTo(0, gy);
-    for (let x = 0; x <= 256; x += 24) ctx.lineTo(x, gy + rand(-3, 3));
-    ctx.stroke();
-  }
-  speckle(ctx, 0, 0, 256, 256, 500, 0.12);
+  grain(ctx, 256, 256, 275);
+  weathering(ctx, 256, 13, '150,104,64', 0.41, 0.38);
+  weathering(ctx, 256, 10, '29,21,16', 0.49, 0.65);
+  speckle(ctx, 0, 0, 256, 256, 900, 0.2);
+  ctx.strokeStyle = 'rgba(181,147,106,0.28)';
+  ctx.lineWidth = 0.8;
+  for (let i = 0; i < 32; i++) fracture(ctx, rand(10, 220), rand(8, 248), 3, rand(-2, 2), 5);
   return toTexture(c);
 }
 
-/** Worn fabric for sofa / bed. */
-export function fabric(baseR = 46, baseG = 38, baseB = 40) {
+export function fabric(baseR = 77, baseG = 52, baseB = 53) {
   const c = makeCanvas(256, 256);
   const ctx = c.getContext('2d');
   ctx.fillStyle = `rgb(${baseR},${baseG},${baseB})`;
   ctx.fillRect(0, 0, 256, 256);
-  for (let y = 0; y < 256; y += 3) {
-    ctx.fillStyle = `rgba(0,0,0,${y % 6 === 0 ? 0.18 : 0.07})`;
-    ctx.fillRect(0, y, 256, 1);
+  for (let y = 0; y < 256; y += 2) {
+    for (let x = (y % 4); x < 256; x += 4) {
+      ctx.fillStyle = 'rgba(185,166,144,0.21)';
+      ctx.fillRect(x, y, 3, 1);
+      ctx.fillStyle = 'rgba(26,22,20,0.29)';
+      ctx.fillRect(x + 2, y, 1, 2);
+    }
   }
-  speckle(ctx, 0, 0, 256, 256, 900, 0.1);
+  weathering(ctx, 256, 10, '142,125,106', 0.38);
+  weathering(ctx, 256, 7, '30,28,23', 0.37);
+  speckle(ctx, 0, 0, 256, 256, 950, 0.17, false);
+  ctx.strokeStyle = 'rgba(34,26,22,0.44)';
+  ctx.strokeRect(5, 5, 246, 246);
+  ctx.strokeStyle = 'rgba(176,148,124,0.36)';
+  ctx.setLineDash([2, 3]);
+  ctx.strokeRect(7, 7, 242, 242);
+  return toTexture(c);
+}
+
+export function oldGlass() {
+  const c = makeCanvas(256, 256);
+  const ctx = c.getContext('2d');
+  const sky = ctx.createLinearGradient(0, 0, 0, 256);
+  sky.addColorStop(0, '#62799a');
+  sky.addColorStop(0.58, '#364961');
+  sky.addColorStop(1, '#19283a');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, 256, 256);
+  weathering(ctx, 256, 14, '30,32,38', 0.61, 1.6);
+  weathering(ctx, 256, 10, '143,149,150', 0.34, 1.8);
+  speckle(ctx, 0, 0, 256, 256, 1250, 0.24);
+  ctx.lineWidth = 0.8;
+  ctx.strokeStyle = 'rgba(178,188,203,0.62)';
+  const [x, y] = fracture(ctx, 15, 178, 5, -3, 9);
+  fracture(ctx, x, y, 2, -4, 5);
+  fracture(ctx, x, y, 3, 2, 4);
+  fracture(ctx, 239, 15, -3, 3, 11);
   return toTexture(c);
 }
 
 /**
  * A pale gaunt face for the portraits.
- * variant 0: staring · 1: mouth torn wide open · 2: hollow black eyes
+ * variant 0: staring ? 1: mouth torn wide open ? 2: hollow black eyes
  */
 export function drawFace(ctx, size, intensity = 1, variant = 0) {
   const cx = size / 2, cy = size / 2;
@@ -196,7 +290,7 @@ export function drawFace(ctx, size, intensity = 1, variant = 0) {
   const showPupils = variant !== 2;
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, size, size);
-  // head shape — elongated pale oval
+  // head shape ? elongated pale oval
   let grad = ctx.createRadialGradient(cx, cy * 0.92, size * 0.05, cx, cy, size * 0.42);
   grad.addColorStop(0, `rgba(${168 * intensity},${164 * intensity},${158 * intensity},1)`);
   grad.addColorStop(0.72, `rgba(${110 * intensity},${104 * intensity},${100 * intensity},1)`);
@@ -346,12 +440,13 @@ export function cobweb() {
   // radial threads
   const spokes = [];
   for (let i = 0; i <= 7; i++) {
-    const a = (i / 7) * (Math.PI / 2);
+    const a = (i / 7) * (Math.PI / 2) + rand(-0.045, 0.045);
     spokes.push(a);
-    ctx.lineWidth = 0.7;
+    ctx.lineWidth = rand(0.55, 1.25);
     ctx.beginPath();
     ctx.moveTo(cx, cy);
-    ctx.lineTo(cx + Math.cos(a) * 240, cy + Math.sin(a) * 240);
+    ctx.quadraticCurveTo(cx + Math.cos(a) * 110 - 5, cy + Math.sin(a) * 110 + 4,
+      cx + Math.cos(a) * 240, cy + Math.sin(a) * 240);
     ctx.stroke();
   }
   // sagging connecting arcs
@@ -364,7 +459,8 @@ export function cobweb() {
       const x1 = cx + Math.cos(a1) * r, y1 = cy + Math.sin(a1) * r;
       const mx = (x0 + x1) / 2 + Math.cos((a0 + a1) / 2) * 8;
       const my = (y0 + y1) / 2 + Math.sin((a0 + a1) / 2) * 8;
-      if (i === 0) ctx.moveTo(x0, y0);
+      ctx.moveTo(x0, y0);
+      if (r > 90 && Math.random() < 0.19) continue;
       ctx.quadraticCurveTo(mx, my, x1, y1);
     }
     ctx.stroke();
@@ -391,7 +487,7 @@ export function flashlightCookie() {
   return tex;
 }
 
-/** Old portrait painting — dim hooded figure. */
+/** Old portrait painting ? dim hooded figure. */
 export function portrait() {
   const c = makeCanvas(256, 320);
   const ctx = c.getContext('2d');
@@ -427,6 +523,12 @@ export function portrait() {
     for (let s = 0; s < 6; s++) { x += rand(-25, 25); y += rand(-25, 25); ctx.lineTo(x, y); }
     ctx.stroke();
   }
+  speckle(ctx, 0, 0, 256, 320, 1800, 0.19, false);
+  const vignette = ctx.createRadialGradient(130, 145, 65, 130, 145, 180);
+  vignette.addColorStop(0, 'rgba(39,29,17,0)');
+  vignette.addColorStop(1, 'rgba(13,9,7,0.74)');
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, 256, 320);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
